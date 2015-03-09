@@ -11,6 +11,12 @@ import pypyodbc
 from collections import defaultdict
 
 
+template_top_left = cv2.imread("topleft.png", cv2.IMREAD_GRAYSCALE)
+template_top_right = cv2.imread("topright.png", cv2.IMREAD_GRAYSCALE)
+template_top = cv2.imread("top.png", cv2.IMREAD_GRAYSCALE)
+template_bottom = cv2.imread("bottom.png", cv2.IMREAD_GRAYSCALE)
+
+
 def compute_angle(line):
     angle = math.atan2(line[3] - line[1], line[2] - line[0])
     return angle
@@ -143,9 +149,11 @@ def merge_lines(lines_to_merge, image_shape, is_vertical=True):
     if is_vertical:
         prev = min(lines_sorted[0][0], lines_sorted[0][2])
         merged_lines_text = "mergelinesV.txt"
+        min_length = 5
     else:
         prev = min(lines_sorted[0][1], lines_sorted[0][3])
         merged_lines_text = "mergelinesH.txt"
+        min_length = 1
     with open(merged_lines_text, "w") as txt:
         l = lines_sorted[0]
         txt.write("{}, {}\n".format((l[0], l[1]), (l[2], l[3])))
@@ -158,7 +166,7 @@ def merge_lines(lines_to_merge, image_shape, is_vertical=True):
             if diff < 9:
                 lines_adjacent.append(l)
             else:
-                if len(lines_adjacent) > 3:
+                if len(lines_adjacent) >= min_length:
                     lines_adjacent_collection.append(lines_adjacent)
                 lines_adjacent = [l]
             prev = cur
@@ -191,6 +199,7 @@ def find_template(template, source, top, left, bottom, right):
     s = source.copy()
     source_cropped, offset_x, offset_y = crop_relative(s, top, left, bottom,
                                                        right)
+    cv2.imwrite("templateregion.png", source_cropped)
     method = cv2.TM_CCOEFF_NORMED
     result = cv2.matchTemplate(source_cropped, template, method)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
@@ -201,20 +210,30 @@ def find_template(template, source, top, left, bottom, right):
     return top_left, bottom_right
 
 
-def preprocess(source, template_top_left, template_top_right):
-    top_left, bottom_right = find_template(template_top_left, source, 0.2, 0.1,
-                                           0.35, 0.2)
+def preprocess(source):
+    top_left, bottom_right = find_template(template_top, source, 0.1, 0.3,
+                                           0.3, 0.5)
     crop_top = bottom_right[1]
-    crop_left = top_left[0]
-    top_left, bottom_right = find_template(template_top_right, source, 0.2,
-                                           0.45, 0.35, 0.55)
-    crop_right = top_left[0]
-    crop_bottom = 0.65 * source.shape[0]
+    crop_left = top_left[0] - 0.1 * source.shape[0]
+    crop_right = top_left[0] + 0.1 * source.shape[1]
+
+    top_left, bottom_right = find_template(template_bottom, source, 0.65, 0.25,
+                                           0.85, 0.45)
+    crop_bottom = bottom_right[1]
     cropped = crop(source, crop_top, crop_left, crop_bottom, crop_right)
     cv2.imwrite("cropped.png", cropped)
 
     angle = compute_skew(cropped)
     rotated = rotate(source, angle)
+
+    top_left, bottom_right = find_template(template_top, rotated, 0.1, 0.3,
+                                           0.3, 0.5)
+    crop_top = bottom_right[1]
+    crop_left = top_left[0]
+    crop_right = bottom_right[0]
+    top_left, bottom_right = find_template(template_bottom, rotated, 0.65, 0.25,
+                                           0.85, 0.45)
+    crop_bottom = bottom_right[1]
     rotated_cropped = crop(rotated, crop_top, crop_left, crop_bottom,
                            crop_right)
     cv2.imwrite("rotated.png", rotated_cropped)
@@ -244,7 +263,8 @@ def seg_intersect(la, lb):
 
 
 def find_lines(image, lines_img):
-    lines = cv2.HoughLinesP(image, 1, math.pi / 360, 80, None, 40, 1)[0]
+    lines = cv2.HoughLinesP(image, 1, math.pi / 360, 1, None, 15, 1)[0]
+    print len(lines)
     lines_horizontal = []
     lines_vertical = []
     for x in lines:
@@ -269,8 +289,9 @@ def find_genders(image):
     color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     lines_vertical, lines_horizontal = find_lines(binary, color.copy())
     lines_merged_vertical = merge_lines(lines_vertical, image.shape)
-    if len(lines_merged_vertical) < 7:
+    if len(lines_merged_vertical) != 3:
         print "Vertical lines: {}".format(len(lines_merged_vertical))
+        return None
     lines_merged_horizontal = merge_lines(lines_horizontal, image.shape, False)
     merged_lines_img = color.copy()
     with open("linesV.txt", "w") as line_text:
@@ -286,18 +307,16 @@ def find_genders(image):
             line_text.write("{}, {}\n".format(pt1, pt2))
             cv2.line(merged_lines_img, pt1, pt2, (0, 0, 255), 2)
     cv2.imwrite("linesmerged.png", merged_lines_img)
-    sects_v = [lines_merged_vertical[4], lines_merged_vertical[5],
-               lines_merged_vertical[6]]
     intersections = []
     sects = []
-    for y in sects_v:
+    for y in lines_merged_vertical:
         sect = (y[0], y[1])
         sects.append(sect)
         cv2.circle(color, sect, 3, (0, 0, 255), -1)
     intersections.append(sects)
     for x in xrange(15):
         sects = []
-        for y in sects_v:
+        for y in lines_merged_vertical:
             sect = seg_intersect(lines_merged_horizontal[x], y)
             sects.append(sect)
             cv2.circle(color, sect, 3, (0, 0, 255), -1)
@@ -337,8 +356,6 @@ def main():
     np.seterr('raise')
     image_dir = r"C:/Users/rhdgjest/Documents/004706498/"
     image_extension = ".jpg"
-    template_top_left = cv2.imread("topleft.png", cv2.IMREAD_GRAYSCALE)
-    template_top_right = cv2.imread("topright.png", cv2.IMREAD_GRAYSCALE)
     working_dir = os.getcwd()
 
     conn = pypyodbc.connect(
@@ -352,8 +369,8 @@ def main():
     for v in cursor:
         res[v[0]].append((v[1], v[2]))
 
-    for k, v in (i for i in res.iteritems() if '325' in i[0]):
-    # for k, v in res.iteritems():
+    # for k, v in (i for i in res.iteritems() if '325' in i[0]):
+    for k, v in res.iteritems():
         image_split = os.path.split(k)
         image_name = image_split[1]
         image_path = os.path.join(image_dir, image_name)
@@ -367,13 +384,11 @@ def main():
         os.chdir(copy_dir)
         shutil.copy(image_path, copy_name)
         source = cv2.imread(copy_name, cv2.IMREAD_GRAYSCALE)
-        processed = preprocess(source, template_top_left, template_top_right)
+        processed = preprocess(source)
         print image_name
 
-        try:
-            genders = find_genders(processed)
-        except IndexError:
-            continue
+        genders = find_genders(processed)
+        if genders is None: continue
         max_iters = min(len(genders), len(v))
         expected_db_no = 0
         for i in xrange(0, max_iters):
