@@ -377,14 +377,18 @@ def extract_genders(source):
 
 def extract_absent(source):
     top_left, bottom_right = find_template(templates["absent_left.png"], source,
-                                           0.65, 0.85, 0.05, 0.25)
+                                           0.65, 0.85, 0.0, 0.25)
     crop_left = bottom_right[0]
     crop_bottom = bottom_right[1] - 10
+    left = float(crop_left) / source.shape[1]
+    right = left + 0.1
     top_left, bottom_right = find_template(templates["absent_top.png"], source,
-                                           0.6, 0.8, 0.15, 0.35)
+                                           0.6, 0.8, left, right)
     crop_top = bottom_right[1]
+    left = bottom_right
+    right = left + 0.1
     top_left, bottom_right = find_template(templates["absent_right.png"],
-                                           source, 0.6, 0.8, 0.25, 0.45)
+                                           source, 0.6, 0.8, left, right)
     crop_right = top_left[0] - 5
 
     cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
@@ -399,23 +403,42 @@ def extract_absent(source):
 
 def main():
     np.seterr('raise')
-    image_dir = r"C:/Users/rhdgjest/Documents/004706498/"
+    image_dir = r"C:/Users/rhdgjest/Documents/1875/todo"
+    image_index = {}
+    for root, dirs, files in os.walk(image_dir):
+        for f in files:
+            image_index[f] = os.path.join(root, f)
     working_dir = os.getcwd()
 
     conn = pypyodbc.connect(
         r"Driver={Microsoft Access Driver (*.mdb, *.accdb)};"
         r"Dbq=C:\Users\rhdgjest\Documents\censusscan\data\RestVestfold.accdb;")
     cursor = conn.cursor()
-    cursor.execute("SELECT DISTINCT IMAGE_ID FROM main "
-                   "WHERE FOLDER=4706498 AND MULTI_RECORD_TYPE='TYPE 1' "
-                   "ORDER BY IMAGE_ID")
+    query = u"""
+        SELECT DISTINCT main.IMAGE_ID
+        FROM main
+        WHERE (((main.EVENT_CLERICAL_DISTRICT)='Borre' Or
+        (main.EVENT_CLERICAL_DISTRICT)='Nøtterøy' Or
+        (main.EVENT_CLERICAL_DISTRICT)='Brunlanes' Or
+        (main.EVENT_CLERICAL_DISTRICT)='Hedrum') AND
+        ((main.MULTI_RECORD_TYPE)='TYPE 1'))
+        ORDER BY main.IMAGE_ID;
+    """
+    cursor.execute(query)
     absent = []
+    teh = list(cursor)
     # for k, v in (i for i in res.iteritems() if '917' in i[0]):
-    for row in cursor:
+    for row in teh[685:]:
         img = row[0]
         image_split = os.path.split(img)
         image_name = image_split[1]
-        image_path = os.path.join(image_dir, image_name)
+        print image_name
+        try:
+            image_path = image_index[image_name]
+        except KeyError:
+            print "{} missing".format(image_name)
+            absent.append((image_name, "missing"))
+            continue
         input_name = image_path
         if (__debug__):
             copy_dir = os.path.join(working_dir, "results", image_name)
@@ -430,16 +453,16 @@ def main():
         source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
         binary = extract_absent(source)
         if binary is None:
-            absent.append((image_name, "?????"))
-            print "{}: ?????".format(image_name)
+            print "{} error".format(image_name)
+            absent.append((image_name, "error"))
             continue
         pixels = sum(1 for _ in (pix for pix in binary.flat if pix > 0))
         if pixels > 500:
-            print "{}:  {}".format(image_name, pixels)
+            print "{} {}".format(image_name, pixels)
             absent.append((image_name, pixels))
 
     key = lambda x: x[0]
-    absentstrings = ("{}:  {}\n".format(x[0], x[1]) for x in
+    absentstrings = ("{} {}\n".format(x[0], x[1]) for x in
                      sorted(absent, key=key))
     with open("absent.txt", "w") as out:
         out.writelines(absentstrings)
