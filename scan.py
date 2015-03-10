@@ -4,17 +4,40 @@ import shutil
 import os
 import errno
 import itertools
+from collections import defaultdict
 
 import numpy as np
 import cv2
 import pypyodbc
-from collections import defaultdict
 
 
-template_top_left = cv2.imread("topleft.png", cv2.IMREAD_GRAYSCALE)
-template_top_right = cv2.imread("topright.png", cv2.IMREAD_GRAYSCALE)
-template_top = cv2.imread("top.png", cv2.IMREAD_GRAYSCALE)
-template_bottom = cv2.imread("bottom.png", cv2.IMREAD_GRAYSCALE)
+root_dir = os.getcwd()
+
+
+class keydefaultdict(defaultdict):
+    def __missing__(self, key):
+        if self.default_factory is None:
+            raise KeyError(key)
+        else:
+            result = self.default_factory(key)
+            if result is None:
+                raise KeyError(key)
+            else:
+                self[key] = result
+                return result
+
+
+def load_template(name):
+    return cv2.imread(os.path.join(root_dir, "templates", name),
+                      cv2.IMREAD_GRAYSCALE)
+
+
+templates = keydefaultdict(load_template)
+
+
+def debug_write(name, image):
+    if __debug__:
+        cv2.imwrite(name, image)
 
 
 def compute_angle(line):
@@ -181,25 +204,25 @@ def merge_lines(lines_to_merge, image_shape, is_vertical=True):
                 lines_adjacent_collection]
 
 
-def crop(source, top, left, bottom, right):
+def crop(source, top, bottom, left, right):
     cropped = source[top:bottom, left:right]
     return cropped
 
 
-def crop_relative(source, top, left, bottom, right):
+def crop_relative(source, top, bottom, left, right):
     w = source.shape[1]
     h = source.shape[0]
     top = int(top * h)
     left = int(left * w)
-    return crop(source, top, left, bottom * h, right * w), left, top
+    return crop(source, top, bottom * h, left, right * w), left, top
 
 
-def find_template(template, source, top, left, bottom, right):
+def find_template(template, source, top, bottom, left, right):
     h, w = template.shape
     s = source.copy()
-    source_cropped, offset_x, offset_y = crop_relative(s, top, left, bottom,
+    source_cropped, offset_x, offset_y = crop_relative(s, top, bottom, left,
                                                        right)
-    cv2.imwrite("templateregion.png", source_cropped)
+    debug_write("templateregion.png", source_cropped)
     method = cv2.TM_CCOEFF_NORMED
     result = cv2.matchTemplate(source_cropped, template, method)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
@@ -208,36 +231,6 @@ def find_template(template, source, top, left, bottom, right):
     top_left = (top_left[0] + offset_x, top_left[1] + offset_y)
     bottom_right = (bottom_right[0] + offset_x, bottom_right[1] + offset_y)
     return top_left, bottom_right
-
-
-def preprocess(source):
-    top_left, bottom_right = find_template(template_top, source, 0.1, 0.3,
-                                           0.3, 0.5)
-    crop_top = bottom_right[1]
-    crop_left = top_left[0] - 0.1 * source.shape[0]
-    crop_right = top_left[0] + 0.1 * source.shape[1]
-
-    top_left, bottom_right = find_template(template_bottom, source, 0.65, 0.25,
-                                           0.85, 0.45)
-    crop_bottom = bottom_right[1]
-    cropped = crop(source, crop_top, crop_left, crop_bottom, crop_right)
-    cv2.imwrite("cropped.png", cropped)
-
-    angle = compute_skew(cropped)
-    rotated = rotate(source, angle)
-
-    top_left, bottom_right = find_template(template_top, rotated, 0.1, 0.3,
-                                           0.3, 0.5)
-    crop_top = bottom_right[1]
-    crop_left = top_left[0]
-    crop_right = bottom_right[0]
-    top_left, bottom_right = find_template(template_bottom, rotated, 0.65, 0.25,
-                                           0.85, 0.45)
-    crop_bottom = bottom_right[1]
-    rotated_cropped = crop(rotated, crop_top, crop_left, crop_bottom,
-                           crop_right)
-    cv2.imwrite("rotated.png", rotated_cropped)
-    return rotated_cropped
 
 
 def perp(a):
@@ -327,15 +320,15 @@ def find_genders(image):
     for i in xrange(0, len(intersections) - 1):
         cur = intersections[i]
         next = intersections[i + 1]
-        male_img = crop(image, cur[0][1], cur[0][0], next[1][1], next[1][0])
-        male_img, _, _ = crop_relative(male_img, 0.1, 0.1, 0.9, 0.9)
+        male_img = crop(image, cur[0][1], next[1][1], cur[0][0], next[1][0])
+        male_img, _, _ = crop_relative(male_img, 0.1, 0.9, 0.1, 0.9)
         _, male_img = cv2.threshold(male_img, 127, 255, cv2.THRESH_BINARY_INV)
         num_male = 0
         for j in male_img.flat:
             if j > 0:
                 num_male += 1
-        female_img = crop(image, cur[1][1], cur[1][0], next[2][1], next[2][0])
-        female_img, _, _ = crop_relative(female_img, 0.1, 0.1, 0.9, 0.9)
+        female_img = crop(image, cur[1][1], next[2][1], cur[1][0], next[2][0])
+        female_img, _, _ = crop_relative(female_img, 0.1, 0.9, 0.1, 0.9)
         _, female_img = cv2.threshold(female_img, 127, 255,
                                       cv2.THRESH_BINARY_INV)
         num_female = 0
@@ -352,52 +345,104 @@ def find_genders(image):
     return genders
 
 
+def extract_genders(source):
+    top_left, bottom_right = find_template(template_gender_top, source, 0.1,
+                                           0.3, 0.3, 0.5)
+    crop_top = bottom_right[1]
+    crop_left = top_left[0] - 0.1 * source.shape[0]
+    crop_right = top_left[0] + 0.1 * source.shape[1]
+
+    top_left, bottom_right = find_template(template_gender_bottom, source, 0.65,
+                                           0.85, 0.25, 0.45)
+    crop_bottom = bottom_right[1]
+    cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
+    cv2.imwrite("cropped.png", cropped)
+
+    angle = compute_skew(cropped)
+    rotated = rotate(source, angle)
+
+    top_left, bottom_right = find_template(template_gender_top, rotated, 0.1,
+                                           0.3, 0.3, 0.5)
+    crop_top = bottom_right[1]
+    crop_left = top_left[0]
+    crop_right = bottom_right[0]
+    top_left, bottom_right = find_template(template_gender_bottom, rotated,
+                                           0.65, 0.85, 0.25, 0.45)
+    crop_bottom = bottom_right[1]
+    rotated_cropped = crop(rotated, crop_top, crop_bottom, crop_left,
+                           crop_right)
+    cv2.imwrite("rotated.png", rotated_cropped)
+    return rotated_cropped
+
+
+def extract_absent(source):
+    top_left, bottom_right = find_template(templates["absent_left.png"], source,
+                                           0.65, 0.85, 0.05, 0.25)
+    crop_left = bottom_right[0]
+    crop_bottom = bottom_right[1] - 10
+    top_left, bottom_right = find_template(templates["absent_top.png"], source,
+                                           0.6, 0.8, 0.15, 0.35)
+    crop_top = bottom_right[1]
+    top_left, bottom_right = find_template(templates["absent_right.png"],
+                                           source, 0.6, 0.8, 0.25, 0.45)
+    crop_right = top_left[0] - 5
+
+    cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
+
+    debug_write("cropped.png", cropped)
+    blurred = cv2.medianBlur(cropped, 5)
+    debug_write("blurred.png", blurred)
+    _, binary = cv2.threshold(blurred, 127, 255, cv2.THRESH_BINARY_INV)
+    debug_write("binary.png", binary)
+    return binary
+
+
 def main():
     np.seterr('raise')
     image_dir = r"C:/Users/rhdgjest/Documents/004706498/"
-    image_extension = ".jpg"
     working_dir = os.getcwd()
 
     conn = pypyodbc.connect(
         r"Driver={Microsoft Access Driver (*.mdb, *.accdb)};"
         r"Dbq=C:\Users\rhdgjest\Documents\censusscan\data\RestVestfold.accdb;")
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT IMAGE_ID, PR_PERSON_NBR, PR_SEX_CODE FROM main "
-        "WHERE FOLDER=4706498 AND MULTI_RECORD_TYPE='TYPE 1'")
-    res = defaultdict(list)
-    for v in cursor:
-        res[v[0]].append((v[1], v[2]))
-
-    # for k, v in (i for i in res.iteritems() if '325' in i[0]):
-    for k, v in res.iteritems():
-        image_split = os.path.split(k)
+    cursor.execute("SELECT DISTINCT IMAGE_ID FROM main "
+                   "WHERE FOLDER=4706498 AND MULTI_RECORD_TYPE='TYPE 1' "
+                   "ORDER BY IMAGE_ID")
+    absent = []
+    # for k, v in (i for i in res.iteritems() if '917' in i[0]):
+    for row in cursor:
+        img = row[0]
+        image_split = os.path.split(img)
         image_name = image_split[1]
         image_path = os.path.join(image_dir, image_name)
-        copy_dir = os.path.join(working_dir, "results", image_name)
-        try:
-            os.makedirs(copy_dir)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
-        copy_name = "source" + image_extension
-        os.chdir(copy_dir)
-        shutil.copy(image_path, copy_name)
-        source = cv2.imread(copy_name, cv2.IMREAD_GRAYSCALE)
-        processed = preprocess(source)
-        print image_name
+        input_name = image_path
+        if (__debug__):
+            copy_dir = os.path.join(working_dir, "results", image_name)
+            try:
+                os.makedirs(copy_dir)
+            except OSError as e:
+                if e.errno != errno.EEXIST:
+                    raise
+            os.chdir(copy_dir)
+            shutil.copy(image_path, image_name)
+            input_name = image_name
+        source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
+        binary = extract_absent(source)
+        if binary is None:
+            absent.append((image_name, "?????"))
+            print "{}: ?????".format(image_name)
+            continue
+        pixels = sum(1 for _ in (pix for pix in binary.flat if pix > 0))
+        if pixels > 500:
+            print "{}:  {}".format(image_name, pixels)
+            absent.append((image_name, pixels))
 
-        genders = find_genders(processed)
-        if genders is None: continue
-        max_iters = min(len(genders), len(v))
-        expected_db_no = 0
-        for i in xrange(0, max_iters):
-            expected_db_no += 1
-            row = v[i]
-            db_no = int(row[0])
-            if db_no != expected_db_no:
-                print "Skipped person {}".format(expected_db_no)
-                expected_db_no += 1
+    key = lambda x: x[0]
+    absentstrings = ("{}:  {}\n".format(x[0], x[1]) for x in
+                     sorted(absent, key=key))
+    with open("absent.txt", "w") as out:
+        out.writelines(absentstrings)
 
 
 main()
