@@ -449,7 +449,7 @@ def main():
                 print "{} error".format(image_name)
                 absent.append((image_name, "error"))
                 continue
-            pixels = sum(1 for _ in (pix for pix in binary.flat if pix > 0))
+            pixels = (0 < binary).sum()
             if pixels > 500:
                 print "{} {}".format(image_name, pixels)
                 absent.append((image_name, pixels))
