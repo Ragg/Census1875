@@ -5,6 +5,7 @@ import os
 import errno
 import itertools
 from collections import defaultdict
+import sys
 
 import numpy as np
 import cv2
@@ -376,20 +377,22 @@ def extract_genders(source):
 
 
 def extract_absent(source):
+    top_top_left, top_bottom_right = find_template(templates["absent_top.png"],
+                                                   source, 0.65, 0.9, 0.1, 0.4)
+    crop_top = top_bottom_right[1]
+    left = float(top_bottom_right[0]) / source.shape[1]
+    right = left + 0.15
+    top = max(0.0, float(top_top_left[1]) / source.shape[0] - 0.05)
+    bottom = top + 0.15
+    top_left, bottom_right = find_template(templates["absent_right.png"],
+                                           source, top, bottom, left, right)
+    crop_right = top_left[0] - 5
+    left = max(0.0, float(top_top_left[0]) / source.shape[1] - 0.15)
+    right = left + 0.2
     top_left, bottom_right = find_template(templates["absent_left.png"], source,
-                                           0.65, 0.9, 0.0, 0.25)
+                                           top, bottom, left, right)
     crop_left = bottom_right[0]
     crop_bottom = bottom_right[1] - 10
-    left = float(crop_left) / source.shape[1]
-    right = left + 0.2
-    top_left, bottom_right = find_template(templates["absent_top.png"], source,
-                                           0.65, 0.9, left, right)
-    crop_top = bottom_right[1]
-    left = float(bottom_right[0]) / source.shape[1]
-    right = left + 0.2
-    top_left, bottom_right = find_template(templates["absent_right.png"],
-                                           source, 0.65, 0.9, left, right)
-    crop_right = top_left[0] - 5
 
     cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
 
@@ -418,7 +421,7 @@ def main():
         SELECT DISTINCT IMAGE_ID FROM main
         WHERE EVENT_CLERICAL_DISTRICT='{}' AND (MULTI_RECORD_TYPE)='TYPE 1'
         ORDER BY main.IMAGE_ID;"""
-    districts = ['Stokke']
+    districts = sys.argv[1:]
     for d in districts:
         cursor.execute(query.format(d))
         absent = []
@@ -457,7 +460,7 @@ def main():
         key = lambda x: x[0]
         absentstrings = ("{} {}\n".format(x[0], x[1]) for x in
                          sorted(absent, key=key))
-        with open("{}.txt.".format(d), "w") as out:
+        with open(os.path.join(root_dir, "{}.txt.".format(d)), "w") as out:
             out.writelines(absentstrings)
 
 
