@@ -382,13 +382,13 @@ def extract_absent(source):
     crop_top = top_bottom_right[1]
     left = float(top_bottom_right[0]) / source.shape[1]
     right = left + 0.15
-    top = max(0.0, float(top_top_left[1]) / source.shape[0] - 0.05)
-    bottom = top + 0.15
+    top = max(0.0, float(top_top_left[1]) / source.shape[0] - 0.04)
+    bottom = top + 0.1
     top_left, bottom_right = find_template(templates["absent_right.png"],
                                            source, top, bottom, left, right)
     crop_right = top_left[0] - 5
-    left = max(0.0, float(top_top_left[0]) / source.shape[1] - 0.15)
-    right = left + 0.2
+    right = float(top_top_left[0]) / source.shape[1]
+    left = max(0.0, right - 0.1)
     top_left, bottom_right = find_template(templates["absent_left.png"], source,
                                            top, bottom, left, right)
     crop_left = bottom_right[0]
