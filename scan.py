@@ -377,18 +377,18 @@ def extract_genders(source):
 
 def extract_absent(source):
     top_left, bottom_right = find_template(templates["absent_left.png"], source,
-                                           0.65, 0.85, 0.0, 0.25)
+                                           0.65, 0.9, 0.0, 0.25)
     crop_left = bottom_right[0]
     crop_bottom = bottom_right[1] - 10
     left = float(crop_left) / source.shape[1]
-    right = left + 0.1
+    right = left + 0.2
     top_left, bottom_right = find_template(templates["absent_top.png"], source,
-                                           0.6, 0.8, left, right)
+                                           0.65, 0.9, left, right)
     crop_top = bottom_right[1]
-    left = bottom_right
-    right = left + 0.1
+    left = float(bottom_right[0]) / source.shape[1]
+    right = left + 0.2
     top_left, bottom_right = find_template(templates["absent_right.png"],
-                                           source, 0.6, 0.8, left, right)
+                                           source, 0.65, 0.9, left, right)
     crop_right = top_left[0] - 5
 
     cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
@@ -415,57 +415,50 @@ def main():
         r"Dbq=C:\Users\rhdgjest\Documents\censusscan\data\RestVestfold.accdb;")
     cursor = conn.cursor()
     query = u"""
-        SELECT DISTINCT main.IMAGE_ID
-        FROM main
-        WHERE (((main.EVENT_CLERICAL_DISTRICT)='Borre' Or
-        (main.EVENT_CLERICAL_DISTRICT)='Nøtterøy' Or
-        (main.EVENT_CLERICAL_DISTRICT)='Brunlanes' Or
-        (main.EVENT_CLERICAL_DISTRICT)='Hedrum') AND
-        ((main.MULTI_RECORD_TYPE)='TYPE 1'))
-        ORDER BY main.IMAGE_ID;
-    """
-    cursor.execute(query)
-    absent = []
-    teh = list(cursor)
-    # for k, v in (i for i in res.iteritems() if '917' in i[0]):
-    for row in teh[685:]:
-        img = row[0]
-        image_split = os.path.split(img)
-        image_name = image_split[1]
-        print image_name
-        try:
-            image_path = image_index[image_name]
-        except KeyError:
-            print "{} missing".format(image_name)
-            absent.append((image_name, "missing"))
-            continue
-        input_name = image_path
-        if (__debug__):
-            copy_dir = os.path.join(working_dir, "results", image_name)
+        SELECT DISTINCT IMAGE_ID FROM main
+        WHERE EVENT_CLERICAL_DISTRICT='{}' AND (MULTI_RECORD_TYPE)='TYPE 1'
+        ORDER BY main.IMAGE_ID;"""
+    districts = ['Stokke']
+    for d in districts:
+        cursor.execute(query.format(d))
+        absent = []
+        for row in cursor:
+            img = row[0]
+            image_split = os.path.split(img)
+            image_name = image_split[1]
             try:
-                os.makedirs(copy_dir)
-            except OSError as e:
-                if e.errno != errno.EEXIST:
-                    raise
-            os.chdir(copy_dir)
-            shutil.copy(image_path, image_name)
-            input_name = image_name
-        source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
-        binary = extract_absent(source)
-        if binary is None:
-            print "{} error".format(image_name)
-            absent.append((image_name, "error"))
-            continue
-        pixels = sum(1 for _ in (pix for pix in binary.flat if pix > 0))
-        if pixels > 500:
-            print "{} {}".format(image_name, pixels)
-            absent.append((image_name, pixels))
+                image_path = image_index[image_name]
+            except KeyError:
+                print "{} missing".format(image_name)
+                absent.append((image_name, "missing"))
+                continue
+            input_name = image_path
+            if __debug__:
+                copy_dir = os.path.join(working_dir, "results", image_name)
+                try:
+                    os.makedirs(copy_dir)
+                except OSError as e:
+                    if e.errno != errno.EEXIST:
+                        raise
+                os.chdir(copy_dir)
+                shutil.copy(image_path, image_name)
+                input_name = image_name
+            source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
+            binary = extract_absent(source)
+            if binary is None:
+                print "{} error".format(image_name)
+                absent.append((image_name, "error"))
+                continue
+            pixels = sum(1 for _ in (pix for pix in binary.flat if pix > 0))
+            if pixels > 500:
+                print "{} {}".format(image_name, pixels)
+                absent.append((image_name, pixels))
 
-    key = lambda x: x[0]
-    absentstrings = ("{} {}\n".format(x[0], x[1]) for x in
-                     sorted(absent, key=key))
-    with open("absent.txt", "w") as out:
-        out.writelines(absentstrings)
+        key = lambda x: x[0]
+        absentstrings = ("{} {}\n".format(x[0], x[1]) for x in
+                         sorted(absent, key=key))
+        with open("{}.txt.".format(d), "w") as out:
+            out.writelines(absentstrings)
 
 
 main()
