@@ -392,7 +392,7 @@ def extract_absent(source):
     top_left, bottom_right = find_template(templates["absent_left.png"], source,
                                            top, bottom, left, right)
     crop_left = bottom_right[0]
-    crop_bottom = bottom_right[1] - 10
+    crop_bottom = bottom_right[1] - 15
 
     cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
 
