@@ -394,7 +394,8 @@ def extract_absent(source):
     crop_left = bottom_right[0] + 5
     crop_bottom = crop_top + (bottom_right[1] - crop_top) * 2.5
 
-    cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
+    cropped = crop(source, crop_top - 50, crop_bottom + 50, crop_left - 50,
+                   crop_right + 50)
 
     debug_write("cropped.png", cropped)
     blurred = cv2.GaussianBlur(cropped,(5,5),0)
@@ -402,7 +403,10 @@ def extract_absent(source):
     _, binary = cv2.threshold(blurred, 0, 255,
                               cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
     debug_write("binary.png", binary)
-    return binary
+    cropped_binary = crop(binary, 50, binary.shape[0] - 50, 50, binary.shape[
+        1] - 50)
+    debug_write("cropped_binary.png", cropped_binary)
+    return cropped_binary
 
 
 def main():
