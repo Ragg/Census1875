@@ -391,15 +391,16 @@ def extract_absent(source):
     left = max(0.0, right - 0.1)
     top_left, bottom_right = find_template(templates["absent_left.png"], source,
                                            top, bottom, left, right)
-    crop_left = bottom_right[0]
-    crop_bottom = bottom_right[1] - 15
+    crop_left = bottom_right[0] + 5
+    crop_bottom = crop_top + (bottom_right[1] - crop_top) * 2.5
 
     cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
 
     debug_write("cropped.png", cropped)
-    blurred = cv2.medianBlur(cropped, 5)
+    blurred = cv2.GaussianBlur(cropped,(5,5),0)
     debug_write("blurred.png", blurred)
-    _, binary = cv2.threshold(blurred, 127, 255, cv2.THRESH_BINARY_INV)
+    _, binary = cv2.threshold(blurred, 0, 255,
+                              cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
     debug_write("binary.png", binary)
     return binary
 
@@ -453,9 +454,7 @@ def main():
                 absent.append((image_name, "error"))
                 continue
             pixels = (0 < binary).sum()
-            if pixels > 500:
-                print "{} {}".format(image_name, pixels)
-                absent.append((image_name, pixels))
+            absent.append((image_name, pixels))
 
         key = lambda x: x[0]
         absentstrings = ("{} {}\n".format(x[0], x[1]) for x in
