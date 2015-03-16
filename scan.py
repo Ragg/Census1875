@@ -398,13 +398,13 @@ def extract_absent(source):
                    crop_right + 50)
 
     debug_write("cropped.png", cropped)
-    blurred = cv2.GaussianBlur(cropped,(5,5),0)
+    blurred = cv2.GaussianBlur(cropped, (5, 5), 0)
     debug_write("blurred.png", blurred)
     _, binary = cv2.threshold(blurred, 0, 255,
-                              cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
+                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     debug_write("binary.png", binary)
-    cropped_binary = crop(binary, 50, binary.shape[0] - 50, 50, binary.shape[
-        1] - 50)
+    cropped_binary = crop(binary, 50, binary.shape[0] - 50, 50,
+                          binary.shape[1] - 50)
     debug_write("cropped_binary.png", cropped_binary)
     return cropped_binary
 
@@ -460,11 +460,20 @@ def main():
             pixels = (0 < binary).sum()
             absent.append((image_name, pixels))
 
-        key = lambda x: x[0]
+        key_score = lambda x: x[0]
         absentstrings = ("{} {}\n".format(x[0], x[1]) for x in
-                         sorted(absent, key=key))
-        with open(os.path.join(root_dir, "{}.txt.".format(d)), "w") as out:
+                         sorted(absent, key=key_score))
+        scorestrings = []
+        key_name = lambda x: x[1]
+        format_str = '<a href="{}">{}</a><br>'
+        for x in sorted(absent, key=key_name):
+            scorestrings.append(format_str.format(image_index[x[0]],
+                                                  "{} {}\n".format(x[0], x[1])))
+
+        with open(os.path.join(root_dir, "{}.txt".format(d)), "w") as out:
             out.writelines(absentstrings)
+        with open(os.path.join(root_dir, "{}.html".format(d)), "w") as out:
+            out.writelines(scorestrings)
 
 
 main()
