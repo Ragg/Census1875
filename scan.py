@@ -426,9 +426,9 @@ def main():
         SELECT DISTINCT IMAGE_ID FROM main
         WHERE EVENT_CLERICAL_DISTRICT='{}' AND (MULTI_RECORD_TYPE)='TYPE 1'
         ORDER BY main.IMAGE_ID;"""
-    districts = sys.argv[1:]
-    for d in districts:
-        cursor.execute(query.format(d))
+    districts = (unicode(x, sys.stdin.encoding) for x in sys.argv[1:])
+    for district in districts:
+        cursor.execute(query.format(district))
         absent = []
         for row in cursor:
             img = row[0]
@@ -470,9 +470,11 @@ def main():
             scorestrings.append(format_str.format(image_index[x[0]],
                                                   "{} {}\n".format(x[0], x[1])))
 
-        with open(os.path.join(root_dir, "{}.txt".format(d)), "w") as out:
+        with open(os.path.join(root_dir, u"{}.txt".format(district)), "w") as\
+                out:
             out.writelines(absentstrings)
-        with open(os.path.join(root_dir, "{}.html".format(d)), "w") as out:
+        with open(os.path.join(root_dir, u"{}.html".format(district)),
+                  "w") as out:
             out.writelines(scorestrings)
 
 
