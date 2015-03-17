@@ -5,7 +5,7 @@ import os
 import errno
 import itertools
 from collections import defaultdict
-
+import sys
 import numpy as np
 import cv2
 import pypyodbc
@@ -35,7 +35,7 @@ def load_template(name):
 templates = keydefaultdict(load_template)
 
 
-def debug_write(name, image):
+def debug_write_image(name, image):
     if __debug__:
         cv2.imwrite(name, image)
 
@@ -49,19 +49,16 @@ def compute_skew(image):
     _, binary = cv2.threshold(image, 127, 255, cv2.THRESH_BINARY_INV)
     lines = cv2.HoughLinesP(binary, 1, math.pi / 360, 1, None, 70, 1)[0]
     mean_angle = 0
-    with open("angles.txt", "w") as angles:
-        for line in lines:
-            angle = compute_angle(line)
-            if abs(angle) > math.pi / 4:
-                if angle > 0:
-                    angle -= math.pi / 2
-                elif angle < 0:
-                    angle += math.pi / 2
-            mean_angle += angle
-            pt1 = (line[0], line[1])
-            pt2 = (line[2], line[3])
-            angles.write(
-                "{}-{}: {}/{}\n".format(pt1, pt2, math.degrees(angle), angle))
+    for line in lines:
+        angle = compute_angle(line)
+        if abs(angle) > math.pi / 4:
+            if angle > 0:
+                angle -= math.pi / 2
+            elif angle < 0:
+                angle += math.pi / 2
+        mean_angle += angle
+        pt1 = (line[0], line[1])
+        pt2 = (line[2], line[3])
     mean_angle /= len(lines)
     return mean_angle
 
@@ -194,7 +191,7 @@ def merge_lines(lines_to_merge, image_shape, is_vertical=True):
                 lines_adjacent = [l]
             prev = cur
             txt.write("{}, {}\n".format((l[0], l[1]), (l[2], l[3])))
-        if len(lines_adjacent) > 5:
+        if len(lines_adjacent) >= min_length:
             lines_adjacent_collection.append(lines_adjacent)
     if is_vertical:
         return [simple_merge_line(l, image_shape, True) for l in
@@ -222,7 +219,7 @@ def find_template(template, source, top, bottom, left, right):
     s = source.copy()
     source_cropped, offset_x, offset_y = crop_relative(s, top, bottom, left,
                                                        right)
-    debug_write("templateregion.png", source_cropped)
+    debug_write_image("templateregion.png", source_cropped)
     method = cv2.TM_CCOEFF_NORMED
     result = cv2.matchTemplate(source_cropped, template, method)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
@@ -255,37 +252,48 @@ def seg_intersect(la, lb):
     return int(round(result[0])), int(round(result[1]))
 
 
-def find_lines(image, lines_img):
-    lines = cv2.HoughLinesP(image, 1, math.pi / 360, 1, None, 15, 1)[0]
-    print len(lines)
+def find_lines(image):
+    threshold, binary = cv2.threshold(image, 0, 255,
+                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    debug_write_image("binary.png", binary)
+    canny = cv2.Canny(image, threshold/2, threshold)
+    debug_write_image("canny.png", canny)
+    lines_binary = cv2.HoughLinesP(binary, 1, math.pi / 360, 20, None, 10,
+                                   1)[0]
+    lines_canny = cv2.HoughLinesP(canny, 1, math.pi / 360, 1, None, 20, 1)[0]
     lines_horizontal = []
     lines_vertical = []
-    for x in lines:
-        if abs(compute_angle(x)) > math.pi / 4:
-            if abs(abs(compute_angle(x)) - math.pi / 2) < math.radians(10):
+    for x in lines_canny:
+        if x[1] == x[3]:
+            lines_horizontal.append(x)
+    for x in lines_binary:
+        if x[1] == x[3]:
+            lines_horizontal.append(x)
+        elif abs(abs(compute_angle(x)) - math.pi / 2) < math.radians(10):
+            mag = math.sqrt((x[0] - x[2])**2 + (x[1] - x[3])**2)
+            if mag > 30:
                 lines_vertical.append(x)
-        else:
-            if abs(compute_angle(x)) < math.radians(10):
-                lines_horizontal.append(x)
-    for line in itertools.chain(lines_vertical, lines_horizontal):
-        pt1 = (line[0], line[1])
-        pt2 = (line[2], line[3])
-        cv2.line(lines_img, pt1, pt2, (0, 0, 255), 2)
-    cv2.imwrite("lines.png", lines_img)
     return lines_vertical, lines_horizontal
 
 
 def find_genders(image):
-    _, binary = cv2.threshold(image, 127, 255,
-                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    cv2.imwrite("binary.png", binary)
+    lines_vertical, lines_horizontal = find_lines(image)
     color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
-    lines_vertical, lines_horizontal = find_lines(binary, color.copy())
+    if __debug__:
+        lines_img = color.copy()
+        for line in itertools.chain(lines_vertical, lines_horizontal):
+            pt1 = (line[0], line[1])
+            pt2 = (line[2], line[3])
+            cv2.line(lines_img, pt1, pt2, (0, 0, 255), 2)
+        debug_write_image("lines.png", lines_img)
     lines_merged_vertical = merge_lines(lines_vertical, image.shape)
     if len(lines_merged_vertical) != 3:
         print "Vertical lines: {}".format(len(lines_merged_vertical))
-        return None
+        #return None
     lines_merged_horizontal = merge_lines(lines_horizontal, image.shape, False)
+    if len(lines_merged_horizontal) != 20:
+        print "Horizontal lines: {}".format(len(lines_merged_horizontal))
+        #return None
     merged_lines_img = color.copy()
     with open("linesV.txt", "w") as line_text:
         for line in lines_merged_vertical:
@@ -299,7 +307,7 @@ def find_genders(image):
             pt2 = (line[2], line[3])
             line_text.write("{}, {}\n".format(pt1, pt2))
             cv2.line(merged_lines_img, pt1, pt2, (0, 0, 255), 2)
-    cv2.imwrite("linesmerged.png", merged_lines_img)
+    debug_write_image("linesmerged.png", merged_lines_img)
     intersections = []
     sects = []
     for y in lines_merged_vertical:
@@ -314,7 +322,7 @@ def find_genders(image):
             sects.append(sect)
             cv2.circle(color, sect, 3, (0, 0, 255), -1)
         intersections.append(sects)
-    cv2.imwrite("intersections.png", color)
+    debug_write_image("intersections.png", color)
 
     genders = []
     for i in xrange(0, len(intersections) - 1):
@@ -323,18 +331,12 @@ def find_genders(image):
         male_img = crop(image, cur[0][1], next[1][1], cur[0][0], next[1][0])
         male_img, _, _ = crop_relative(male_img, 0.1, 0.9, 0.1, 0.9)
         _, male_img = cv2.threshold(male_img, 127, 255, cv2.THRESH_BINARY_INV)
-        num_male = 0
-        for j in male_img.flat:
-            if j > 0:
-                num_male += 1
+        num_male = cv2.countNonZero(male_img)
         female_img = crop(image, cur[1][1], next[2][1], cur[1][0], next[2][0])
         female_img, _, _ = crop_relative(female_img, 0.1, 0.9, 0.1, 0.9)
         _, female_img = cv2.threshold(female_img, 127, 255,
                                       cv2.THRESH_BINARY_INV)
-        num_female = 0
-        for j in female_img.flat:
-            if j > 0:
-                num_female += 1
+        num_female = cv2.countNonZero(female_img)
         if num_male < 80 and num_female < 80:
             genders.append(0)
         else:
@@ -346,32 +348,34 @@ def find_genders(image):
 
 
 def extract_genders(source):
-    top_left, bottom_right = find_template(template_gender_top, source, 0.1,
+    top_left, bottom_right = find_template(templates["gender_top.png"], source,
+                                           0.1,
                                            0.3, 0.3, 0.5)
     crop_top = bottom_right[1]
     crop_left = top_left[0] - 0.1 * source.shape[0]
     crop_right = top_left[0] + 0.1 * source.shape[1]
 
-    top_left, bottom_right = find_template(template_gender_bottom, source, 0.65,
+    top_left, bottom_right = find_template(templates["gender_bottom.png"],
+                                           source, 0.65,
                                            0.85, 0.25, 0.45)
     crop_bottom = bottom_right[1]
     cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
-    cv2.imwrite("cropped.png", cropped)
+    debug_write_image("cropped.png", cropped)
 
     angle = compute_skew(cropped)
     rotated = rotate(source, angle)
 
-    top_left, bottom_right = find_template(template_gender_top, rotated, 0.1,
+    top_left, bottom_right = find_template(templates["gender_top.png"], rotated, 0.1,
                                            0.3, 0.3, 0.5)
     crop_top = bottom_right[1]
     crop_left = top_left[0]
     crop_right = bottom_right[0]
-    top_left, bottom_right = find_template(template_gender_bottom, rotated,
+    top_left, bottom_right = find_template(templates["gender_bottom.png"], rotated,
                                            0.65, 0.85, 0.25, 0.45)
     crop_bottom = bottom_right[1]
     rotated_cropped = crop(rotated, crop_top, crop_bottom, crop_left,
                            crop_right)
-    cv2.imwrite("rotated.png", rotated_cropped)
+    debug_write_image("rotated.png", rotated_cropped)
     return rotated_cropped
 
 
@@ -411,4 +415,17 @@ class ImageCollection(object):
             yield image_name, input_name
 
 
-
+if __name__ == "__main__":
+    def main():
+        np.seterr('raise')
+        coll = ImageCollection()
+        districts = (unicode(x, sys.stdin.encoding) for x in sys.argv[1:])
+        for district in districts:
+            images = coll.query(district)
+            genders = []
+            for image_name, input_name in images:
+                source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
+                cropped = extract_genders(source)
+                print image_name
+                print find_genders(cropped)
+    main()

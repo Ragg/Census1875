@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 from scan import ImageCollection, root_dir, find_template, templates, crop, \
-    debug_write
+    debug_write_image
 
 
 def main():
@@ -64,16 +64,17 @@ def extract_absent(source):
     cropped = crop(source, crop_top - 50, crop_bottom + 50, crop_left - 50,
                    crop_right + 50)
 
-    debug_write("cropped.png", cropped)
+    debug_write_image("cropped.png", cropped)
     blurred = cv2.GaussianBlur(cropped, (5, 5), 0)
-    debug_write("blurred.png", blurred)
+    debug_write_image("blurred.png", blurred)
     _, binary = cv2.threshold(blurred, 0, 255,
                               cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    debug_write("binary.png", binary)
+    debug_write_image("binary.png", binary)
     cropped_binary = crop(binary, 50, binary.shape[0] - 50, 50,
                           binary.shape[1] - 50)
-    debug_write("cropped_binary.png", cropped_binary)
+    debug_write_image("cropped_binary.png", cropped_binary)
     return cropped_binary
 
 
-main()
+if __name__ == "__main__":
+    main()
