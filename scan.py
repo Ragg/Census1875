@@ -42,6 +42,12 @@ def debug_write_image(name, image):
         cv2.imwrite(name, image)
 
 
+def debug_open_file(name, mode):
+    if not __debug__:
+        name = os.devnull
+    return open(name, mode)
+
+
 def compute_angle(line):
     angle = math.atan2(line[3] - line[1], line[2] - line[0])
     return angle
@@ -176,7 +182,7 @@ def merge_lines(lines_to_merge, image_shape, is_vertical=True):
         prev = min(lines_sorted[0][1], lines_sorted[0][3])
         merged_lines_text = "mergelinesH.txt"
         min_length = 1
-    with open(merged_lines_text, "w") as txt:
+    with debug_open_file(merged_lines_text, "w") as txt:
         l = lines_sorted[0]
         txt.write("{}, {}\n".format((l[0], l[1]), (l[2], l[3])))
         for l in lines_sorted[1:]:
@@ -255,8 +261,8 @@ def seg_intersect(la, lb):
 
 
 def find_lines(image):
-    _, binary = cv2.threshold(image, 0, 255,
-        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, binary = cv2.threshold(
+        image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     debug_write_image("binary.png", binary)
     lines_binary = cv2.HoughLinesP(binary, 1, math.pi / 360, 20, None, 30, 1)[0]
     lines_vertical = []
@@ -269,6 +275,7 @@ def find_lines(image):
     for x in xrange(0, 19):
         y = int(start + step * x)
         lines_horizontal.append([0, y, 100, y])
+    lines_horizontal.append([0, image.shape[0], 100, image.shape[0]])
     return lines_vertical, lines_horizontal
 
 
@@ -290,16 +297,16 @@ def find_genders(image):
         print "Vertical lines: {}".format(len(lines_merged_vertical))
     lines_merged_horizontal = [[0, x[1], image.shape[1], x[3]] for x in
                                lines_horizontal]
-    if len(lines_merged_horizontal) != 19:
+    if len(lines_merged_horizontal) != 20:
         print "Horizontal lines: {}".format(len(lines_merged_horizontal))
     merged_lines_img = color.copy()
-    with open("linesV.txt", "w") as line_text:
+    with debug_open_file("linesV.txt", "w") as line_text:
         for line in lines_merged_vertical:
             pt1 = (line[0], line[1])
             pt2 = (line[2], line[3])
             line_text.write("{}, {}\n".format(pt1, pt2))
             cv2.line(merged_lines_img, pt1, pt2, (0, 0, 255), 2)
-    with open("linesH.txt", "w") as line_text:
+    with debug_open_file("linesH.txt", "w") as line_text:
         for line in lines_merged_horizontal:
             pt1 = (line[0], line[1])
             pt2 = (line[2], line[3])
@@ -313,10 +320,10 @@ def find_genders(image):
         sects.append(sect)
         cv2.circle(color, sect, 3, (0, 0, 255), -1)
     intersections.append(sects)
-    for x in xrange(19):
+    for x in lines_merged_horizontal:
         sects = []
         for y in lines_merged_vertical:
-            sect = seg_intersect(lines_merged_horizontal[x], y)
+            sect = seg_intersect(x, y)
             sects.append(sect)
             cv2.circle(color, sect, 3, (0, 0, 255), -1)
         intersections.append(sects)
@@ -401,10 +408,15 @@ if __name__ == "__main__":
         districts = (unicode(x, sys.stdin.encoding) for x in sys.argv[1:])
         for district in districts:
             images = coll.query(district)
-            genders = []
+            gender_collection = []
             for image_name, input_name in images:
                 source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
                 cropped = extract_genders(source)
-                print image_name
-                print find_genders(cropped)
+                genders = find_genders(cropped)
+                gender_string = "{} {}".format(
+                    image_name, " ".join(str(x) for x in genders))
+                print gender_string
+                gender_collection.append(gender_string)
+            with open("genders_{}.txt".format(district), "w") as f:
+                f.writelines(gender_collection)
     main()
