@@ -6,9 +6,11 @@ import errno
 import itertools
 from collections import defaultdict
 import sys
+
 import numpy as np
 import cv2
 import pypyodbc
+import scandir
 
 
 root_dir = os.getcwd()
@@ -253,31 +255,28 @@ def seg_intersect(la, lb):
 
 
 def find_lines(image):
-    threshold, binary = cv2.threshold(image, 0, 255,
-                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, binary = cv2.threshold(image, 0, 255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     debug_write_image("binary.png", binary)
-    canny = cv2.Canny(image, threshold/2, threshold)
-    debug_write_image("canny.png", canny)
-    lines_binary = cv2.HoughLinesP(binary, 1, math.pi / 360, 20, None, 10,
-                                   1)[0]
-    lines_canny = cv2.HoughLinesP(canny, 1, math.pi / 360, 1, None, 20, 1)[0]
-    lines_horizontal = []
+    lines_binary = cv2.HoughLinesP(binary, 1, math.pi / 360, 20, None, 30, 1)[0]
     lines_vertical = []
-    for x in lines_canny:
-        if x[1] == x[3]:
-            lines_horizontal.append(x)
     for x in lines_binary:
-        if x[1] == x[3]:
-            lines_horizontal.append(x)
-        elif abs(abs(compute_angle(x)) - math.pi / 2) < math.radians(10):
-            mag = math.sqrt((x[0] - x[2])**2 + (x[1] - x[3])**2)
-            if mag > 30:
-                lines_vertical.append(x)
+        if abs(abs(compute_angle(x)) - math.pi / 2) < math.radians(10):
+            lines_vertical.append(x)
+    lines_horizontal = []
+    start = image.shape[0] * 0.077
+    step = (image.shape[0] - start) * 0.0526
+    for x in xrange(0, 19):
+        y = int(start + step * x)
+        lines_horizontal.append([0, y, 100, y])
     return lines_vertical, lines_horizontal
 
 
 def find_genders(image):
     lines_vertical, lines_horizontal = find_lines(image)
+    blurred = cv2.GaussianBlur(image, (5, 5), 0)
+    _, binary = cv2.threshold(
+        blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     if __debug__:
         lines_img = color.copy()
@@ -289,11 +288,10 @@ def find_genders(image):
     lines_merged_vertical = merge_lines(lines_vertical, image.shape)
     if len(lines_merged_vertical) != 3:
         print "Vertical lines: {}".format(len(lines_merged_vertical))
-        #return None
-    lines_merged_horizontal = merge_lines(lines_horizontal, image.shape, False)
-    if len(lines_merged_horizontal) != 20:
+    lines_merged_horizontal = [[0, x[1], image.shape[1], x[3]] for x in
+                               lines_horizontal]
+    if len(lines_merged_horizontal) != 19:
         print "Horizontal lines: {}".format(len(lines_merged_horizontal))
-        #return None
     merged_lines_img = color.copy()
     with open("linesV.txt", "w") as line_text:
         for line in lines_merged_vertical:
@@ -315,7 +313,7 @@ def find_genders(image):
         sects.append(sect)
         cv2.circle(color, sect, 3, (0, 0, 255), -1)
     intersections.append(sects)
-    for x in xrange(15):
+    for x in xrange(19):
         sects = []
         for y in lines_merged_vertical:
             sect = seg_intersect(lines_merged_horizontal[x], y)
@@ -328,16 +326,13 @@ def find_genders(image):
     for i in xrange(0, len(intersections) - 1):
         cur = intersections[i]
         next = intersections[i + 1]
-        male_img = crop(image, cur[0][1], next[1][1], cur[0][0], next[1][0])
+        male_img = crop(binary, cur[0][1], next[1][1], cur[0][0], next[1][0])
         male_img, _, _ = crop_relative(male_img, 0.1, 0.9, 0.1, 0.9)
-        _, male_img = cv2.threshold(male_img, 127, 255, cv2.THRESH_BINARY_INV)
         num_male = cv2.countNonZero(male_img)
-        female_img = crop(image, cur[1][1], next[2][1], cur[1][0], next[2][0])
+        female_img = crop(binary, cur[1][1], next[2][1], cur[1][0], next[2][0])
         female_img, _, _ = crop_relative(female_img, 0.1, 0.9, 0.1, 0.9)
-        _, female_img = cv2.threshold(female_img, 127, 255,
-                                      cv2.THRESH_BINARY_INV)
         num_female = cv2.countNonZero(female_img)
-        if num_male < 80 and num_female < 80:
+        if abs(num_male - num_female) < 100:
             genders.append(0)
         else:
             if num_male > num_female:
@@ -349,41 +344,25 @@ def find_genders(image):
 
 def extract_genders(source):
     top_left, bottom_right = find_template(templates["gender_top.png"], source,
-                                           0.1,
-                                           0.3, 0.3, 0.5)
+                                           0.1, 0.3, 0.3, 0.5)
     crop_top = bottom_right[1]
-    crop_left = top_left[0] - 0.1 * source.shape[0]
-    crop_right = top_left[0] + 0.1 * source.shape[1]
+    margin = (bottom_right[0] - top_left[0]) * 0.1
+    crop_left = top_left[0] - margin
+    crop_right = bottom_right[0] + margin
 
     top_left, bottom_right = find_template(templates["gender_bottom.png"],
-                                           source, 0.65,
-                                           0.85, 0.25, 0.45)
-    crop_bottom = bottom_right[1]
+                                           source, 0.65, 0.85, 0.25, 0.45)
+    crop_bottom = top_left[1]
     cropped = crop(source, crop_top, crop_bottom, crop_left, crop_right)
     debug_write_image("cropped.png", cropped)
-
-    angle = compute_skew(cropped)
-    rotated = rotate(source, angle)
-
-    top_left, bottom_right = find_template(templates["gender_top.png"], rotated, 0.1,
-                                           0.3, 0.3, 0.5)
-    crop_top = bottom_right[1]
-    crop_left = top_left[0]
-    crop_right = bottom_right[0]
-    top_left, bottom_right = find_template(templates["gender_bottom.png"], rotated,
-                                           0.65, 0.85, 0.25, 0.45)
-    crop_bottom = bottom_right[1]
-    rotated_cropped = crop(rotated, crop_top, crop_bottom, crop_left,
-                           crop_right)
-    debug_write_image("rotated.png", rotated_cropped)
-    return rotated_cropped
+    return cropped
 
 
 class ImageCollection(object):
     def __init__(self):
         self.image_dir = r"C:/Users/rhdgjest/Documents/1875/todo"
         self.image_index = {}
-        for root, dirs, files in os.walk(self.image_dir):
+        for root, dirs, files in scandir.walk(self.image_dir):
             for f in files:
                 self.image_index[f] = os.path.join(root, f)
         self._conn = pypyodbc.connect(
