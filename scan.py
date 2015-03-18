@@ -334,13 +334,13 @@ def find_genders(image):
         cur = intersections[i]
         next = intersections[i + 1]
         male_img = crop(binary, cur[0][1], next[1][1], cur[0][0], next[1][0])
-        male_img, _, _ = crop_relative(male_img, 0.1, 0.9, 0.1, 0.9)
+        male_img, _, _ = crop_relative(male_img, 0.05, 0.95, 0.15, 0.85)
         num_male = cv2.countNonZero(male_img)
         female_img = crop(binary, cur[1][1], next[2][1], cur[1][0], next[2][0])
-        female_img, _, _ = crop_relative(female_img, 0.1, 0.9, 0.1, 0.9)
+        female_img, _, _ = crop_relative(female_img, 0.05, 0.95, 0.15, 0.85)
         num_female = cv2.countNonZero(female_img)
-        if abs(num_male - num_female) < 100:
-            genders.append(0)
+        if abs(num_male - num_female) < 50:
+            break
         else:
             if num_male > num_female:
                 genders.append(1)
@@ -413,7 +413,7 @@ if __name__ == "__main__":
                 source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
                 cropped = extract_genders(source)
                 genders = find_genders(cropped)
-                gender_string = "{} {}".format(
+                gender_string = "{} {}\n".format(
                     image_name, " ".join(str(x) for x in genders))
                 print gender_string
                 gender_collection.append(gender_string)
