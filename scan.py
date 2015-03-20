@@ -54,20 +54,21 @@ def compute_angle(line):
 
 
 def compute_skew(image):
-    _, binary = cv2.threshold(image, 127, 255, cv2.THRESH_BINARY_INV)
-    lines = cv2.HoughLinesP(binary, 1, math.pi / 360, 1, None, 70, 1)[0]
+    lines = cv2.HoughLinesP(image, 1, math.pi / 360, 1, None, 30, 1)[0]
     mean_angle = 0
+    num_angles = 0
     for line in lines:
         angle = compute_angle(line)
+        if abs(abs(angle) - math.pi / 2) > math.degrees(10):
+            continue
         if abs(angle) > math.pi / 4:
             if angle > 0:
                 angle -= math.pi / 2
             elif angle < 0:
                 angle += math.pi / 2
         mean_angle += angle
-        pt1 = (line[0], line[1])
-        pt2 = (line[2], line[3])
-    mean_angle /= len(lines)
+        num_angles += 1
+    mean_angle /= num_angles
     return mean_angle
 
 
@@ -133,11 +134,9 @@ def poly_merge_line(l, image_shape, is_vertical):
         return point_left + point_right
 
 
-def simple_merge_line(l, image_shape, is_vertical):
-    if is_vertical:
-        key = lambda x: x[1]
-    else:
-        key = lambda x: x[0]
+def simple_merge_line(l, start, end):
+    assert start < end
+    key = lambda x: x[1]
     s = sorted(l, key=key)
     first = s[0]
     last = s[-1]
@@ -146,67 +145,65 @@ def simple_merge_line(l, image_shape, is_vertical):
     x2 = last[2]
     y2 = last[3]
     if x1 == x2:
-        point_top = (x1, 0)
-        point_bottom = (x1, image_shape[0])
+        point_top = (x1, start)
+        point_bottom = (x1, end)
         return point_top + point_bottom
-
     a = float((y2 - y1)) / (x2 - x1)
     b = y1 - a * x1
     p = np.poly1d((a, b))
-    if is_vertical:
-        image_height = image_shape[0]
-        point_top = (int(round(p.roots[0])), 0)
-        point_bottom = (
-            int(round((p - image_height).roots[0])), image_height)
-        return point_top + point_bottom
-    else:
-        image_width = image_shape[1]
-        point_left = (0, int(round(p(0))))
-        point_right = (image_width, int(round(p(image_width))))
-        return point_left + point_right
+    point_top = (int(round((p - start).roots[0])), start)
+    point_bottom = (int(round((p - end).roots[0])), end)
+    return point_top + point_bottom
 
 
-def merge_lines(lines_to_merge, image_shape, is_vertical=True):
-    if is_vertical:
-        key = lambda line: line[0]
-    else:
-        key = lambda line: line[1]
-    lines_sorted = sorted(lines_to_merge, key=key)
-    lines_adjacent_collection = []
-    lines_adjacent = [lines_sorted[0]]
-    if is_vertical:
+def merge_lines(lines, image_shape):
+    lines_split = [[], []]
+    for l in lines:
+        if min(l[1], l[3]) < image_shape[0] / 2:
+            lines_split[0].append(l)
+        else:
+            lines_split[1].append(l)
+    key = lambda line: line[0]
+    lines_merged = []
+    first = True
+    for lines_to_merge in lines_split:
+        lines_sorted = sorted(lines_to_merge, key=key)
+        lines_adjacent_collection = []
+        lines_adjacent = [lines_sorted[0]]
         prev = min(lines_sorted[0][0], lines_sorted[0][2])
         merged_lines_text = "mergelinesV.txt"
         min_length = 5
-    else:
-        prev = min(lines_sorted[0][1], lines_sorted[0][3])
-        merged_lines_text = "mergelinesH.txt"
-        min_length = 1
-    with debug_open_file(merged_lines_text, "w") as txt:
-        l = lines_sorted[0]
-        txt.write("{}, {}\n".format((l[0], l[1]), (l[2], l[3])))
-        for l in lines_sorted[1:]:
-            if is_vertical:
-                cur = min(l[0], l[2])
-            else:
-                cur = min(l[1], l[3])
-            diff = abs(cur - prev)
-            if diff < 9:
-                lines_adjacent.append(l)
-            else:
-                if len(lines_adjacent) >= min_length:
-                    lines_adjacent_collection.append(lines_adjacent)
-                lines_adjacent = [l]
-            prev = cur
+        with debug_open_file(merged_lines_text, "w") as txt:
+            l = lines_sorted[0]
             txt.write("{}, {}\n".format((l[0], l[1]), (l[2], l[3])))
-        if len(lines_adjacent) >= min_length:
-            lines_adjacent_collection.append(lines_adjacent)
-    if is_vertical:
-        return [simple_merge_line(l, image_shape, True) for l in
-                lines_adjacent_collection]
-    else:
-        return [poly_merge_line(l, image_shape, False) for l in
-                lines_adjacent_collection]
+            for l in lines_sorted[1:]:
+                cur = min(l[0], l[2])
+                diff = abs(cur - prev)
+                if diff < 9:
+                    lines_adjacent.append(l)
+                else:
+                    if len(lines_adjacent) >= min_length:
+                        lines_adjacent_collection.append(lines_adjacent)
+                    lines_adjacent = [l]
+                prev = cur
+                txt.write("{}, {}\n".format((l[0], l[1]), (l[2], l[3])))
+            if len(lines_adjacent) >= min_length:
+                lines_adjacent_collection.append(lines_adjacent)
+            if first:
+                start = 0
+                end = image_shape[0] / 2
+            else:
+                start = image_shape[0] / 2
+                end = image_shape[0]
+            lines_merged.append([simple_merge_line(l, start, end) for l in
+                                 lines_adjacent_collection])
+            first = False
+    final_lines = []
+    for x in xrange(0, 3):
+        final_lines.append(
+            simple_merge_line([lines_merged[0][x], lines_merged[1][x]], 0,
+                              image_shape[0]))
+    return final_lines
 
 
 def crop(source, top, bottom, left, right):
@@ -261,10 +258,7 @@ def seg_intersect(la, lb):
 
 
 def find_lines(image):
-    _, binary = cv2.threshold(
-        image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    debug_write_image("binary.png", binary)
-    lines_binary = cv2.HoughLinesP(binary, 1, math.pi / 360, 20, None, 30, 1)[0]
+    lines_binary = cv2.HoughLinesP(image, 1, math.pi / 360, 20, None, 30, 1)[0]
     lines_vertical = []
     for x in lines_binary:
         if abs(abs(compute_angle(x)) - math.pi / 2) < math.radians(10):
@@ -280,11 +274,11 @@ def find_lines(image):
 
 
 def find_genders(image):
-    lines_vertical, lines_horizontal = find_lines(image)
     blurred = cv2.GaussianBlur(image, (5, 5), 0)
-    _, binary = cv2.threshold(
-        blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    debug_write_image("binary2.png", binary)
+    _, binary = cv2.threshold(blurred, 0, 255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    debug_write_image("binary.png", binary)
+    lines_vertical, lines_horizontal = find_lines(binary)
     color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     if __debug__:
         lines_img = color.copy()
@@ -329,6 +323,8 @@ def find_genders(image):
             cv2.circle(color, sect, 3, (0, 0, 255), -1)
         intersections.append(sects)
     debug_write_image("intersections.png", color)
+    if len(lines_merged_vertical) != 3:
+        return [0]
 
     genders = []
     for i in xrange(0, len(intersections) - 1):
@@ -356,7 +352,7 @@ def extract_genders(source):
     top_left, bottom_right = find_template(templates["gender_top.png"], source,
                                            0.1, 0.3, 0.3, 0.5)
     crop_top = bottom_right[1]
-    margin = (bottom_right[0] - top_left[0]) * 0.1
+    margin = (bottom_right[0] - top_left[0]) * 0.3
     crop_left = top_left[0] - margin
     crop_right = bottom_right[0] + margin
 
@@ -409,19 +405,22 @@ if __name__ == "__main__":
         np.seterr('raise')
         coll = ImageCollection()
         districts = (unicode(x, sys.stdin.encoding) for x in sys.argv[1:])
+        districts = [u"Strømm"]
         for district in districts:
             images = coll.query(district)
             gender_collection = []
             for image_name, input_name in images:
-                #if "00038" not in image_name:continue
+                if "00021" not in image_name:continue
                 source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
                 cropped = extract_genders(source)
                 genders = find_genders(cropped)
-                gender_string = "{} {}\n".format(
-                    image_name, " ".join(str(x) for x in genders))
+                gender_string = "{} {}\n".format(image_name,
+                    " ".join(str(x) for x in genders))
                 print gender_string
                 gender_collection.append(gender_string)
-            with open(os.path.join(
-                    root_dir, "genders_{}.txt".format(district)), "w") as f:
+            with open(
+                    os.path.join(root_dir, u"genders_{}.txt".format(district)),
+                    "w") as f:
                 f.writelines(gender_collection)
+
     main()
