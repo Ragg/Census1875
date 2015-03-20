@@ -284,6 +284,7 @@ def find_genders(image):
     blurred = cv2.GaussianBlur(image, (5, 5), 0)
     _, binary = cv2.threshold(
         blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    debug_write_image("binary2.png", binary)
     color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     if __debug__:
         lines_img = color.copy()
@@ -335,9 +336,11 @@ def find_genders(image):
         next = intersections[i + 1]
         male_img = crop(binary, cur[0][1], next[1][1], cur[0][0], next[1][0])
         male_img, _, _ = crop_relative(male_img, 0.05, 0.95, 0.15, 0.85)
+        debug_write_image("male.png", male_img)
         num_male = cv2.countNonZero(male_img)
         female_img = crop(binary, cur[1][1], next[2][1], cur[1][0], next[2][0])
-        female_img, _, _ = crop_relative(female_img, 0.05, 0.95, 0.15, 0.85)
+        female_img, _, _ = crop_relative(female_img, 0.06, 0.96, 0.15, 0.85)
+        debug_write_image("female.png", female_img)
         num_female = cv2.countNonZero(female_img)
         if abs(num_male - num_female) < 50:
             break
@@ -410,6 +413,7 @@ if __name__ == "__main__":
             images = coll.query(district)
             gender_collection = []
             for image_name, input_name in images:
+                #if "00038" not in image_name:continue
                 source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
                 cropped = extract_genders(source)
                 genders = find_genders(cropped)
@@ -417,6 +421,7 @@ if __name__ == "__main__":
                     image_name, " ".join(str(x) for x in genders))
                 print gender_string
                 gender_collection.append(gender_string)
-            with open("genders_{}.txt".format(district), "w") as f:
+            with open(os.path.join(
+                    root_dir, "genders_{}.txt".format(district)), "w") as f:
                 f.writelines(gender_collection)
     main()

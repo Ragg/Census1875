@@ -12,7 +12,7 @@ if __name__ == "__main__":
         data = f.readlines()
         for line in data:
             spl = line.split()
-            genders[spl[0]] = spl[1:]
+            genders[spl[0]] = map(int, spl[1:])
     conn = pypyodbc.connect(
     r"Driver={Microsoft Access Driver (*.mdb, *.accdb)};"
     r"Dbq=C:\Users\rhdgjest\Documents\censusscan\data\RestVestfold"
@@ -36,14 +36,27 @@ if __name__ == "__main__":
             raise
     for person in cursor:
         image_name = os.path.split(person[0])[1]
-        persons[image_name].append((person[1], person[2]))
+        persons[image_name].append((int(person[1]), person[2]))
     for v in persons.itervalues():
-        v.sort(key=lambda x: int(x[0]))
+        v.sort(key=lambda x: x[0])
     output = []
-    for image, v in persons.iteritems():
+    for image, v in sorted(persons.iteritems()):
         if image in absent:
             output.append("{} {}\n".format(image, "f"))
             continue
-        if len(genders[image]) != len(v):
-            print image + " mismatch"
-    print "teh"
+        if [x[0] for x in v] != range(v[0][0], v[-1][0]+1):
+            continue
+        image_genders = genders[image]
+        for i in xrange(0, max(len(v), len(image_genders))):
+            try:
+                if image_genders[i] == 1 and v[i][1] == "Male" or \
+                   image_genders[i] == 2 and v[i][1] == "Female":
+                    pass
+                else:
+                    out = "{} {}\n".format(image, i+1)
+                    print out
+                    break
+            except IndexError:
+                out = "{} {}\n".format(image, i+1)
+                print out
+                break
