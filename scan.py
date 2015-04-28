@@ -388,7 +388,7 @@ class ImageCollection(object):
             image_path = self.image_index[image_name]
             input_name = image_path
             if __debug__:
-                copy_dir = os.path.join(root_dir, "results", image_name)
+                copy_dir = os.path.join(root_dir, "debug", image_name)
                 try:
                     os.makedirs(copy_dir)
                 except OSError as e:
