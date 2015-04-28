@@ -1,4 +1,6 @@
 # coding=utf-8
+"""Compare information about genders from a district to what's in the
+database, and report discrepancies"""
 from collections import defaultdict
 import os
 import sys

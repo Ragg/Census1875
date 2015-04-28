@@ -1,4 +1,7 @@
 # coding=utf-8
+"""Script that provides some utility functions for processing of 1875 census
+photographs, as well as code to determine the gender of each person in a
+household"""
 import math
 import shutil
 import os
@@ -54,6 +57,7 @@ def compute_angle(line):
 
 
 def compute_skew(image):
+    """Attempt to compute the skew of the image with the Hough Line Transform"""
     lines = cv2.HoughLinesP(image, 1, math.pi / 360, 1, None, 30, 1)[0]
     mean_angle = 0
     num_angles = 0
@@ -80,6 +84,8 @@ def rotate(image, angle):
 
 
 def poly_merge_line(l, image_shape, is_vertical):
+    """Merge several line segments into one continuous line that covers the
+    whole image, using the least squares polynomial fit method"""
     points_x = []
     points_y = []
     for li in l:
@@ -134,12 +140,13 @@ def poly_merge_line(l, image_shape, is_vertical):
         return point_left + point_right
 
 
-def simple_merge_line(l, start, end):
+def simple_merge_line(lines, start, end):
+    """Merge a line from the first and last line of a group of line segments"""
     assert start < end
     key = lambda x: x[1]
-    s = sorted(l, key=key)
-    first = s[0]
-    last = s[-1]
+    sorted_lines = sorted(lines, key=key)
+    first = sorted_lines[0]
+    last = sorted_lines[-1]
     x1 = first[0]
     y1 = first[1]
     x2 = last[2]
@@ -157,7 +164,10 @@ def simple_merge_line(l, start, end):
 
 
 def merge_lines(lines, image_shape):
+    """Take a collection of lines and try to group and merge them into lines
+    that cover the whole image"""
     lines_split = [[], []]
+    # Split the line segments into two groups to lessen the impact of image skew
     for l in lines:
         if min(l[1], l[3]) < image_shape[0] / 2:
             lines_split[0].append(l)
@@ -179,6 +189,9 @@ def merge_lines(lines, image_shape):
             for l in lines_sorted[1:]:
                 cur = min(l[0], l[2])
                 diff = abs(cur - prev)
+                # If the line segment is within a certain distance of the
+                # previous one, consider it part of the same line. Otherwise,
+                #  it's part of another line
                 if diff < 9:
                     lines_adjacent.append(l)
                 else:
@@ -187,6 +200,9 @@ def merge_lines(lines, image_shape):
                     lines_adjacent = [l]
                 prev = cur
                 txt.write("{}, {}\n".format((l[0], l[1]), (l[2], l[3])))
+                # If there are enough line segments, consider the line
+                # segments to belong to a line. Otherwise, it's just noise
+                # and we discard them.
             if len(lines_adjacent) >= min_length:
                 lines_adjacent_collection.append(lines_adjacent)
             if first:
@@ -220,8 +236,11 @@ def crop_relative(source, top, bottom, left, right):
 
 
 def find_template(template, source, top, bottom, left, right):
+    """Find an image in another, larger image using template matching"""
     h, w = template.shape
     s = source.copy()
+    # Crop the image for performance reasons, searching the whole image takes
+    # too long
     source_cropped, offset_x, offset_y = crop_relative(s, top, bottom, left,
                                                        right)
     debug_write_image("templateregion.png", source_cropped)
@@ -235,7 +254,7 @@ def find_template(template, source, top, bottom, left, right):
     return top_left, bottom_right
 
 
-def perp(a):
+def perpendicular(a):
     b = np.empty_like(a)
     b[0] = -a[1]
     b[1] = a[0]
@@ -250,7 +269,7 @@ def seg_intersect(la, lb):
     da = a2 - a1
     db = b2 - b1
     dp = a1 - b1
-    dap = perp(da)
+    dap = perpendicular(da)
     denom = np.dot(dap, db)
     num = np.dot(dap, dp)
     result = num / denom * db + b1
@@ -258,11 +277,14 @@ def seg_intersect(la, lb):
 
 
 def find_lines(image):
+    """Find the line segments in the image"""
+    # Use the Probabilistic Hough Lines method for the vertical lines
     lines_binary = cv2.HoughLinesP(image, 1, math.pi / 360, 20, None, 30, 1)[0]
     lines_vertical = []
     for x in lines_binary:
         if abs(abs(compute_angle(x)) - math.pi / 2) < math.radians(10):
             lines_vertical.append(x)
+    # Find the horizontal lines by simply increasing by a constant value.
     lines_horizontal = []
     start = image.shape[0] * 0.077
     step = (image.shape[0] - start) * 0.0526
@@ -281,6 +303,7 @@ def find_genders(image):
     lines_vertical, lines_horizontal = find_lines(binary)
     color = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
     if __debug__:
+        # Draw the found line segments and write them to an image for debugging
         lines_img = color.copy()
         for line in itertools.chain(lines_vertical, lines_horizontal):
             pt1 = (line[0], line[1])
@@ -365,6 +388,7 @@ def extract_genders(source):
 
 
 class ImageCollection(object):
+    """Collection of census images for one district"""
     def __init__(self):
         self.image_dir = r"C:/Users/rhdgjest/Documents/1875/todo"
         self.image_index = {}
@@ -405,7 +429,8 @@ if __name__ == "__main__":
         np.seterr('raise')
         coll = ImageCollection()
         districts = (unicode(x, sys.stdin.encoding) for x in sys.argv[1:])
-        districts = [u"Strømm"]
+        # districts = [u"Strømm"] # Need to set district name in code
+        # sometimes because of Unicode issues
         for district in districts:
             images = coll.query(district)
             gender_collection = []

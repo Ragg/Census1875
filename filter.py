@@ -1,3 +1,5 @@
+"""Simple script to filter a list of households with temporarily absent
+persons by the pixel count value."""
 import sys
 
 

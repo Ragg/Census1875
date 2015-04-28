@@ -1,3 +1,6 @@
+"""Attempt to determine which households in a district had persons
+temporarily absent by extracting the field from the photograph and analyzing
+it"""
 import os
 import sys
 
@@ -17,6 +20,10 @@ def main():
         absent = []
         for image_name, input_name in images:
             source = cv2.imread(input_name, cv2.IMREAD_GRAYSCALE)
+            # Do a binarization of the absent field and count the amount of
+            # pixels that are not black, and output this score, which will be
+            # used as a basis for whether or not there are absent persons
+            # listed.
             binary = extract_absent(source)
             if binary is None:
                 print "{} error".format(image_name)
@@ -38,12 +45,19 @@ def main():
         with open(os.path.join(root_dir, u"{}.txt".format(district)), "w") as \
                 out:
             out.writelines(absentstrings)
+        # Write out the data in HTML form, sorted by the scores, and with
+        # links to the images, so that we can manually inspect them later and
+        # determine what the cutoff value should be for whether a household
+        # had persons temporarily absent or not
         with open(os.path.join(root_dir, u"{}.html".format(district)),
                   "w") as out:
             out.writelines(scorestrings)
 
 
 def extract_absent(source):
+    """Extract the absent field by finding points around it via template
+    matching, and using those points to determine the bounds of the absent
+    field."""
     top_top_left, top_bottom_right = find_template(templates["absent_top.png"],
                                                    source, 0.65, 0.9, 0.1, 0.4)
     crop_top = top_bottom_right[1]
